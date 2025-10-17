@@ -3,6 +3,7 @@
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
 def rescale_data(X_train, X_test, method='standardization'):
     """
@@ -172,9 +173,9 @@ def fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method
     and evaluate it on both training and test data.
     Return the learned m, b, training MSE, test MSE, training variance explained, test variance explained, and number of iterations used.
     """
-    X_train_scaled, X_test_scaled, method = rescale_data(X_train, X_test, method=rescale_method)
+    X_train_scaled, X_test_scaled, method_used = rescale_data(X_train, X_test, method=rescale_method)
     
-    if method is None:  # no rescaling done
+    if method_used is None:  # no rescaling done
         safe_alpha = get_safe_alpha_for_raw_univariate(X_train_scaled)
         alpha = min(alpha, safe_alpha)
         init_m = 0.0
@@ -199,9 +200,9 @@ def fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_meth
     and evaluate it on both training and test data.
     Return the learned w (as a numpy array), b (as a float), training MSE, test MSE, training variance explained, test variance explained, and number of iterations used.
     """
-    X_train_scaled, X_test_scaled, method = rescale_data(X_train, X_test, method=rescale_method)
+    X_train_scaled, X_test_scaled, method_used = rescale_data(X_train, X_test, method=rescale_method)
     
-    if method is None:  # no rescaling done
+    if method_used is None:  # no rescaling done
         safe_alpha = get_safe_alpha_for_raw_multivariate(X_train_scaled)
         alpha = min(alpha, safe_alpha)
         init_b = 0.0
@@ -239,6 +240,85 @@ def one_step_update_multivariate(X, y, alpha=0.1, init_w=None, init_b=1.0):
     b_new = b - alpha * grad_b
     return w_new, b_new
 
+def prepare_features(X_train, X_test, method='raw'):
+    """
+    Prepare features by applying the specified rescaling method.
+    Supported methods: 'raw', 'standardization', 'normalization', 'log'.
+    """
+    method = (method or '').lower()
+    if method in ['raw', 'none']:
+        return X_train, X_test, 'raw'
+    if method in ['standardization', 'standardize', 'std', 'z-score', 'zscore', 'z score', 'standard']:
+        X_train_scaled, X_test_scaled, _ = rescale_data(X_train, X_test, method='standardization')
+        return X_train_scaled, X_test_scaled, 'standardization'
+    if method in ['normalization', 'min-max', 'minmax', 'min_max', 'min max', 'normal', 'norm']:
+        X_train_scaled, X_test_scaled, _ = rescale_data(X_train, X_test, method='normalization')
+        return X_train_scaled, X_test_scaled, 'normalization'
+    if method in ['log', 'log1p', 'log(x+1)', 'log(x + 1)']:
+        # log transform only
+        return np.log1p(X_train), np.log1p(X_test), 'log1p'
+    # default: raw
+    return X_train, X_test, 'raw'
+
+def statsmodels_fit_and_evaluate(X_train, y_train, X_test, y_test, feature_cols, target_name="y"):
+    """
+    Fit a multivariate linear regression model using statsmodels OLS,
+    and evaluate it on both training and test data.
+    Return a dictionary containing parameters, p-values, t-values, training MSE, test MSE, training variance explained, test variance explained, and the fitted result object.
+    """
+    X_train_df = pd.DataFrame(X_train, columns=feature_cols)
+    X_test_df = pd.DataFrame(X_test,  columns=feature_cols)
+    y_train_s  = pd.Series(y_train, name=target_name)
+    
+    # add intercept
+    X_train_const = sm.add_constant(X_train_df, has_constant='add')
+    X_test_const = sm.add_constant(X_test_df, has_constant='add')
+    
+    # fit model
+    model = sm.OLS(y_train_s, X_train_const)
+    results = model.fit()
+    
+    # predict
+    y_pred_train = results.predict(X_train_const)
+    y_pred_test = results.predict(X_test_const)
+    
+    # evaluate
+    train_mse = mse(y_train, y_pred_train)
+    test_mse = mse(y_test, y_pred_test)
+    train_ve = variance_explained(y_train, y_pred_train)
+    test_ve = variance_explained(y_test, y_pred_test)
+    
+    names = list(X_train_const.columns)
+    params  = pd.Series(np.asarray(results.params), index=names)
+    pvalues = pd.Series(np.asarray(results.pvalues), index=names)
+    tvalues = pd.Series(np.asarray(results.tvalues), index=names)
+    return {
+        "params": params,
+        "pvalues": pvalues,
+        "tvalues": tvalues,
+        "train_mse": train_mse,
+        "test_mse": test_mse,
+        "train_ve": train_ve,
+        "test_ve": test_ve,
+        "result": results,
+        }
+
+def run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag):
+    X_train_prep, X_test_prep, method_used = prepare_features(X_train, X_test, method_tag)
+    results = statsmodels_fit_and_evaluate(X_train_prep, y_train, X_test_prep, y_test, feature_cols=feature_cols, target_name="Concrete compressive strength")
+
+    p_vals = results["pvalues"]
+    pv_features = p_vals.loc[feature_cols] if set(feature_cols).issubset(p_vals.index) else pd.Series({name: p_vals.get(name, np.nan) for name in feature_cols})
+
+    print(f"\n[Part B — {method_used}] Multivariate OLS (train-fit, test-eval)")
+    print("  Train: MSE={:.6f}  VE={:.6f}".format(results["train_mse"], results["train_ve"]))
+    print("  Test : MSE={:.6f}  VE={:.6f}".format(results["test_mse"],  results["test_ve"]))
+    print("  p-values (features):")
+    for k, v in pv_features.items():
+        print(f"    {k}: {v:.6g}")
+
+    return results, pv_features
+
 def main():
     data_file = 'Concrete_Data.csv'
     my_header = ['Cement', 'Blast Furnace Slag', 'Fly Ash', 'Water', 'Superplasticizer', 'Coarse Aggregate', 'Fine Aggregate', 'Age', 'Concrete compressive strength']
@@ -260,7 +340,7 @@ def main():
         y_test = test_df[target_col].to_numpy(dtype=np.float64)
         
         m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test)
-        print(f"Predictor: {col}")
+        print(f"\nPredictor: {col}")
         print(f"  m={m}, b={b}")
         print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
         print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
@@ -274,7 +354,7 @@ def main():
         y_test = test_df[target_col].to_numpy(dtype=np.float64)
         
         m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
-        print(f"Predictor (Unscaled): {col}")
+        print(f"\nPredictor (Unscaled): {col}")
         print(f"  m={m}, b={b}")
         print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
         print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
@@ -285,7 +365,7 @@ def main():
     y1 = np.array([4.0])
     init_w = np.ones(X1.shape[1], dtype=np.float64)
     w1, b1 = one_step_update_multivariate(X1, y1, alpha=0.1, init_w=init_w, init_b=1.0)
-    print("Q2.1 Code test 1:")
+    print("\nQ2.1 Code test 1:")
     print(f"  New m_1: {w1[0]}")
     print(f"  New m_2: {w1[1]}")
     print(f"  New m_3: {w1[2]}")
@@ -300,7 +380,7 @@ def main():
     y2 = np.array([3, 2, 8, 4, 5], dtype=np.float64)
     init_w = np.ones(X2.shape[1], dtype=np.float64)
     w2, b2 = one_step_update_multivariate(X2, y2, alpha=0.1, init_w=init_w, init_b=1.0)
-    print("Q2.2 Code test 2:")
+    print("\nQ2.2 Code test 2:")
     print(f"  New m_1: {w2[0]}")
     print(f"  New m_2: {w2[1]}")
     print(f"  New m_3: {w2[2]}")
@@ -313,7 +393,7 @@ def main():
     y_test = test_df[target_col].to_numpy(dtype=np.float64)
     
     ws, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test)
-    print("Q2.3 Multivariate with rescaling:")
+    print("\nQ2.3 Multivariate with rescaling:")
     print(f"  m={ws}")
     print(f"  b={b}")
     print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
@@ -322,12 +402,18 @@ def main():
     
     # Q2.4 Use original values for the predictors
     ws, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
-    print("Q2.4 Multivariate without rescaling:")
+    print("\nQ2.4 Multivariate without rescaling:")
     print(f"  m={ws}")
     print(f"  b={b}")
     print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
     print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
     print(f"  Iterations used: {iter_used}")
+    
+    # Part B
+    # Q1
+    b_raw, b_raw_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='raw')
+    b_scaled, b_scaled_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='standardization')
+    b_log, b_log_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='log1p')
     
 
 if __name__ == "__main__":
