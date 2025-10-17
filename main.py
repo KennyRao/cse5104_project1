@@ -4,6 +4,7 @@
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy import stats
 
 def rescale_data(X_train, X_test, method='standardization'):
     """
@@ -319,6 +320,51 @@ def run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols
 
     return results, pv_features
 
+def pvalues_for_gd_solution(X, y, w, b, feature_names=None, robust=None):
+    """
+    Compute t-stat p-values for (w, b), assuming OLS model y ≈ Xw + b.
+    robust: None (classical), or 'HC0'/'HC1'/'HC2'/'HC3' for robust SEs.
+    Returns a DataFrame with rows [features..., 'const'] and columns ['coef','se','t','p'].
+    """
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64).ravel()
+    n, p = X.shape
+    A = np.c_[X, np.ones(n)]
+    theta = np.r_[np.asarray(w, dtype=np.float64).ravel(), float(b)]
+
+    r = y - A @ theta
+    k = p + 1
+    df = max(n - k, 1)
+
+    XtX = A.T @ A
+    XtX_inv = np.linalg.pinv(XtX)
+
+    if robust is None:
+        sigma2 = float(r @ r) / df
+        cov = sigma2 * XtX_inv
+    else:
+        if robust.upper() in ("HC0", "HC1"):
+            meat = A.T @ (r[:, None] * r[:, None] * A)
+            if robust.upper() == "HC1":
+                meat *= n / df
+        elif robust.upper() in ("HC2", "HC3"):
+            h = np.sum(A * (A @ XtX_inv), axis=1)
+            if robust.upper() == "HC2":
+                w_i = (r**2) / np.clip(1 - h, 1e-12, None)
+            else:  # HC3
+                w_i = (r**2) / np.clip((1 - h)**2, 1e-12, None)
+            meat = A.T @ (w_i[:, None] * A)
+        else:
+            raise ValueError("robust must be one of None, 'HC0','HC1','HC2','HC3'")
+        cov = XtX_inv @ meat @ XtX_inv
+
+    se = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    tvals = theta / np.where(se == 0, np.inf, se)
+    pvals = 2 * (1 - stats.t.cdf(np.abs(tvals), df))
+
+    names = list(feature_names) + ["const"] if feature_names is not None else [f"x{i+1}" for i in range(p)] + ["const"]
+    return pd.DataFrame({"coef": theta, "se": se, "t": tvals, "p": pvals}, index=names)
+
 def main():
     data_file = 'Concrete_Data.csv'
     my_header = ['Cement', 'Blast Furnace Slag', 'Fly Ash', 'Water', 'Superplasticizer', 'Coarse Aggregate', 'Fine Aggregate', 'Age', 'Concrete compressive strength']
@@ -401,19 +447,25 @@ def main():
     print(f"  Iterations used: {iter_used}")
     
     # Q2.4 Use original values for the predictors
-    ws, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
+    ws_raw, b_raw, train_mse_raw, test_mse_raw, train_ve_raw, test_ve_raw, iter_used_raw = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
     print("\nQ2.4 Multivariate without rescaling:")
-    print(f"  m={ws}")
-    print(f"  b={b}")
-    print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
-    print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
-    print(f"  Iterations used: {iter_used}")
+    print(f"  m={ws_raw}")
+    print(f"  b={b_raw}")
+    print(f"  Train MSE: {train_mse_raw}, Test MSE: {test_mse_raw}")
+    print(f"  Train Variance Explained: {train_ve_raw}, Test Variance Explained: {test_ve_raw}")
+    print(f"  Iterations used: {iter_used_raw}")
     
     # Part B
     # Q1
-    b_raw, b_raw_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='raw')
-    b_scaled, b_scaled_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='standardization')
-    b_log, b_log_p = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='log1p')
+    results_raw, pvals_raw = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='raw')
+    results_scaled, pvals_scaled = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='standardization')
+    results_log, pvals_log = run_multivariate_ols_analysis(X_train, y_train, X_test, y_test, feature_cols, method_tag='log1p')
+    
+    # Q2
+    # Raw model:
+    pval_table_raw = pvalues_for_gd_solution(X_train, y_train, ws_raw, b_raw, feature_names=list(feature_cols), robust=None)
+    print("\nP-values for my GD model (raw features):")
+    print(pval_table_raw.to_string(float_format=lambda v: f"{v:.6g}"))
     
 
 if __name__ == "__main__":
