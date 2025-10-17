@@ -254,10 +254,10 @@ def main():
     
     # Q1.1 Use normalized/standardized values for the predictors
     for col in feature_cols:
-        X_train = train_df[col].to_numpy(dtype=float)
-        y_train = train_df[target_col].to_numpy(dtype=float)
-        X_test = test_df[col].to_numpy(dtype=float)
-        y_test = test_df[target_col].to_numpy(dtype=float)
+        X_train = train_df[col].to_numpy(dtype=np.float64)
+        y_train = train_df[target_col].to_numpy(dtype=np.float64)
+        X_test = test_df[col].to_numpy(dtype=np.float64)
+        y_test = test_df[target_col].to_numpy(dtype=np.float64)
         
         m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test)
         print(f"Predictor: {col}")
@@ -268,10 +268,10 @@ def main():
     
     # Q1.2 Use original values for the predictors
     for col in feature_cols:
-        X_train = train_df[col].to_numpy(dtype=float)
-        y_train = train_df[target_col].to_numpy(dtype=float)
-        X_test = test_df[col].to_numpy(dtype=float)
-        y_test = test_df[target_col].to_numpy(dtype=float)
+        X_train = train_df[col].to_numpy(dtype=np.float64)
+        y_train = train_df[target_col].to_numpy(dtype=np.float64)
+        X_test = test_df[col].to_numpy(dtype=np.float64)
+        y_test = test_df[target_col].to_numpy(dtype=np.float64)
         
         m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
         print(f"Predictor (Unscaled): {col}")
@@ -305,6 +305,29 @@ def main():
     print(f"  New m_2: {w2[1]}")
     print(f"  New m_3: {w2[2]}")
     print(f"  New b:   {b2}")
+    
+    # Q2.3 Use normalized/standardized values for the predictors
+    X_train = train_df[feature_cols].to_numpy(dtype=np.float64)
+    y_train = train_df[target_col].to_numpy(dtype=np.float64)
+    X_test = test_df[feature_cols].to_numpy(dtype=np.float64)
+    y_test = test_df[target_col].to_numpy(dtype=np.float64)
+    
+    ws, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test)
+    print("Q2.3 Multivariate with rescaling:")
+    print(f"  m={ws}")
+    print(f"  b={b}")
+    print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
+    print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
+    print(f"  Iterations used: {iter_used}")
+    
+    # Q2.4 Use original values for the predictors
+    ws, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
+    print("Q2.4 Multivariate without rescaling:")
+    print(f"  m={ws}")
+    print(f"  b={b}")
+    print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
+    print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
+    print(f"  Iterations used: {iter_used}")
     
 
 if __name__ == "__main__":
