@@ -55,46 +55,57 @@ def get_safe_alpha_for_raw_univariate(X):
         return 1e-3
     return 0.5 / loss
 
-def gd_univariate(X, y, init_m=1, init_b=1, alpha=0.05, max_iter=20000, tolerance=1e-6):
+def gd_univariate(X, y, init_m=1, init_b=1, alpha=0.05, max_iter=20000, tolerance=1e-6, patience=200):
     """
     Perform gradient descent to learn m and b by minimizing the cost function.
     Return the learned m, b, and number of iterations used.
     """
     X = np.asarray(X, dtype=np.float64).ravel()
     y = np.asarray(y, dtype=np.float64).ravel()
+    n = y.size
+    inv_n = 1.0 / n
+
     m = float(init_m)
     b = float(init_b)
-    n = len(y)
+
+    last_best = np.inf
+    stale = 0
+
     for i in range(max_iter):
-        m_gradient = 0.0
-        b_gradient = 0.0
-        for j in range(n):
-            x = X[j]
-            error = y[j] - (m * x + b)
-            m_gradient += (-2.0) * x * error
-            b_gradient += (-2.0) * error
-        m_gradient = m_gradient / n
-        b_gradient = b_gradient / n
-        
-        # Check for numerical stability
-        if not np.isfinite(m_gradient) or not np.isfinite(b_gradient):
-            break
-        
-        new_m = m - alpha * m_gradient
-        new_b = b - alpha * b_gradient
-        
-        if abs(new_m - m) < tolerance and abs(new_b - b) < tolerance:
-            m = new_m
-            b = new_b
-            break
-        m = new_m
-        b = new_b
-    return m, b, i+1
+        error = (m * X + b) - y  # shape (n,)
+        loss = float(np.dot(error, error) * inv_n)  # MSE
+
+        # Early stopping based on loss improvement
+        if last_best - loss < tolerance:
+            stale += 1
+            if stale >= patience:
+                return m, b, i + 1
+        else:
+            last_best = loss
+            stale = 0
+
+        # Vectorized gradients
+        grad_m = 2.0 * inv_n * np.dot(X, error)
+        grad_b = 2.0 * inv_n * error.sum()
+
+        # Parameter update
+        delta_m = -alpha * grad_m
+        delta_b = -alpha * grad_b
+        m += delta_m
+        b += delta_b
+
+        # Numerical safety & small-step convergence
+        if not (np.isfinite(m) and np.isfinite(b)):
+            return m, b, i + 1
+        if max(abs(delta_m), abs(delta_b)) < tolerance:
+            return m, b, i + 1
+
+    return m, b, max_iter
 
 def predict_univariate(X, m, b):
     return m * X + b
 
-def fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method='standardization', init_m=1, init_b=1, alpha=0.05, max_iter=20000, tolerance=1e-6):
+def fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method='standardization', init_m=1, init_b=1, alpha=0.05, max_iter=20000, tolerance=1e-6, patience=200):
     """
     Fit a univariate linear regression model using gradient descent on the training data,
     and evaluate it on both training and test data.
@@ -108,7 +119,7 @@ def fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method
         init_m = 0.0
         init_b = 0.0
     
-    m, b, iter_used = gd_univariate(X_train_scaled, y_train, init_m, init_b, alpha, max_iter, tolerance)
+    m, b, iter_used = gd_univariate(X_train_scaled, y_train, init_m, init_b, alpha, max_iter, tolerance, patience)
     
     y_train_pred = predict_univariate(X_train_scaled, m, b)
     y_test_pred = predict_univariate(X_test_scaled, m, b)
@@ -155,7 +166,7 @@ def main():
         X_test = test_df[col].to_numpy(dtype=float)
         y_test = test_df[target_col].to_numpy(dtype=float)
         
-        m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method=None)
+        m, b, train_mse, test_mse, train_ve, test_ve, iter_used = fit_and_evaluate_univariate(X_train, y_train, X_test, y_test, rescale_method=None, max_iter=100000)
         print(f"Predictor (Unscaled): {col}")
         print(f"  m={m}, b={b}")
         print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
