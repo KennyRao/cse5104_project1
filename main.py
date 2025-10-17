@@ -219,6 +219,26 @@ def fit_and_evaluate_multivariate(X_train, y_train, X_test, y_test, rescale_meth
     
     return w, b, train_mse, test_mse, train_ve, test_ve, iter_used
 
+def one_step_update_multivariate(X, y, alpha=0.1, init_w=None, init_b=1.0):
+    """
+    Perform one step of gradient descent update for multivariate linear regression.
+    Return the updated weights w (as a numpy array) and bias b (as a float).
+    """
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64).ravel()
+    n, p = X.shape
+    w = np.ones(p, dtype=np.float64) if init_w is None else np.asarray(init_w, dtype=np.float64).ravel()
+    b = float(init_b)
+    inv_n = 1.0 / n
+
+    r = (X @ w + b) - y
+    grad_w = 2.0 * inv_n * (X.T @ r)
+    grad_b = 2.0 * inv_n * r.sum()
+
+    w_new = w - alpha * grad_w
+    b_new = b - alpha * grad_b
+    return w_new, b_new
+
 def main():
     data_file = 'Concrete_Data.csv'
     my_header = ['Cement', 'Blast Furnace Slag', 'Fly Ash', 'Water', 'Superplasticizer', 'Coarse Aggregate', 'Fine Aggregate', 'Age', 'Concrete compressive strength']
@@ -259,6 +279,32 @@ def main():
         print(f"  Train MSE: {train_mse}, Test MSE: {test_mse}")
         print(f"  Train Variance Explained: {train_ve}, Test Variance Explained: {test_ve}")
         print(f"  Iterations used: {iter_used}")
+    
+    # Q2.1 Code test 1
+    X1 = np.array([[3.0, 4.0, 5.0]])
+    y1 = np.array([4.0])
+    init_w = np.ones(X1.shape[1], dtype=np.float64)
+    w1, b1 = one_step_update_multivariate(X1, y1, alpha=0.1, init_w=init_w, init_b=1.0)
+    print("Q2.1 Code test 1:")
+    print(f"  New m_1: {w1[0]}")
+    print(f"  New m_2: {w1[1]}")
+    print(f"  New m_3: {w1[2]}")
+    print(f"  New b:   {b1}")
+    
+    # Q2.2 Code test 2
+    X2 = np.array([[ 3, 4, 4],
+               [ 4, 2, 1],
+               [10, 2, 5],
+               [ 3, 4, 5],
+               [11, 1, 1]], dtype=np.float64)
+    y2 = np.array([3, 2, 8, 4, 5], dtype=np.float64)
+    init_w = np.ones(X2.shape[1], dtype=np.float64)
+    w2, b2 = one_step_update_multivariate(X2, y2, alpha=0.1, init_w=init_w, init_b=1.0)
+    print("Q2.2 Code test 2:")
+    print(f"  New m_1: {w2[0]}")
+    print(f"  New m_2: {w2[1]}")
+    print(f"  New m_3: {w2[2]}")
+    print(f"  New b:   {b2}")
     
 
 if __name__ == "__main__":
