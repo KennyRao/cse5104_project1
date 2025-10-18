@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats
+import matplotlib.pyplot as plt
 
 def rescale_data(X_train, X_test, method='standardization'):
     """
@@ -365,6 +366,66 @@ def pvalues_for_gd_solution(X, y, w, b, feature_names=None, robust=None):
     names = list(feature_names) + ["const"] if feature_names is not None else [f"x{i+1}" for i in range(p)] + ["const"]
     return pd.DataFrame({"coef": theta, "se": se, "t": tvals, "p": pvals}, index=names)
 
+def gd_multivariate_with_history(X, y, init_w=None, init_b=0.0, alpha=0.05, max_iter=20000, tolerance=1e-6, patience=200):
+    """
+    Same as gd_multivariate but also returns a per-iteration training MSE history.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64).ravel()
+    n, p = X.shape
+    inv_n = 1.0 / n
+
+    w = np.zeros(p, dtype=np.float64) if init_w is None else np.asarray(init_w, dtype=np.float64).ravel()
+    b = float(init_b)
+
+    last_best = np.inf
+    stale = 0
+    mse_history = []
+
+    for i in range(max_iter):
+        errors = (X @ w + b) - y
+        loss = float(np.dot(errors, errors) * inv_n)  # MSE
+        mse_history.append(loss)
+
+        # Early stopping based on loss improvement
+        if last_best - loss < tolerance:
+            stale += 1
+            if stale >= patience:
+                return w, b, mse_history
+        else:
+            last_best = loss
+            stale = 0
+
+        # Gradients and update
+        grad_w = 2.0 * inv_n * (X.T @ errors)
+        grad_b = 2.0 * inv_n * errors.sum()
+
+        w -= alpha * grad_w
+        b -= alpha * grad_b
+
+        # Numerical safety & tiny step convergence
+        if not (np.all(np.isfinite(w)) and np.isfinite(b)):
+            return w, b, mse_history
+        if max(np.max(np.abs(alpha * grad_w)), abs(alpha * grad_b)) < tolerance:
+            return w, b, mse_history
+
+    return w, b, mse_history
+
+
+def save_loss_curve(loss_history, out_path="gd_loss_curve.png", title="GD Training Loss (MSE) per Iteration"):
+    """
+    Save a simple line plot of MSE vs iteration to disk (PNG by default).
+    """
+    fig, ax = plt.subplots()
+    ax.plot(range(1, len(loss_history) + 1), loss_history)
+    ax.set_xlabel("Iteration")
+    ax.set_ylabel("MSE")
+    ax.set_title(title)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
+    return out_path
+
 def main():
     data_file = 'Concrete_Data.csv'
     my_header = ['Cement', 'Blast Furnace Slag', 'Fly Ash', 'Water', 'Superplasticizer', 'Coarse Aggregate', 'Fine Aggregate', 'Age', 'Concrete compressive strength']
@@ -467,6 +528,16 @@ def main():
     print("\nP-values for my GD model (raw features):")
     print(pval_table_raw.to_string(float_format=lambda v: f"{v:.6g}"))
     
+    # Generate and save loss curve for GD with standardized features
+    X_train_std, _, _ = rescale_data(X_train, X_train, method='standardization')
+
+    _, _, loss_hist = gd_multivariate_with_history(X_train_std, y_train, alpha=0.05, max_iter=5000, tolerance=1e-6, patience=200)
+    png_path = save_loss_curve(
+        loss_hist,
+        out_path="gd_loss_curve.png",
+        title="GD Multivariate (Standardized) — Training MSE per Iteration"
+    )
+    print(f"Saved loss curve to {png_path}")
 
 if __name__ == "__main__":
     main()
